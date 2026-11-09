@@ -3,12 +3,14 @@ import { LoginPage } from '../pages/login.page';
 import { NavBar } from '../pages/components/nav-bar';
 import { adminUser, type AdminUser } from '../data/users';
 import { HomePage } from '../pages/home.page';
+import { type Article, createArticle } from '../data/articles';
 
 type MyFixtures = {
     loginPage: LoginPage;
     navBar: NavBar;
     adminUser: AdminUser;
     homePage: HomePage;
+    article: Article;
 }
 
 export const test = base.extend<MyFixtures>({
@@ -28,7 +30,11 @@ export const test = base.extend<MyFixtures>({
         const homePage = new HomePage(page);
         await homePage.goto();
         await use(homePage);
-    }
+    },
+    article: async ({ }, use) => {
+        const article = createArticle();
+        await use(article);
+    },
 });
 
 export { expect } from '@playwright/test';
