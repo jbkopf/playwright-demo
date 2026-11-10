@@ -84,7 +84,7 @@ npx playwright show-report                       # HTML report of the last run
 2. Starts the backend and Postgres with Docker Compose.
 3. Points the frontend at that backend instead of the public demo API (small overrides in [`ci/frontend/`](ci/frontend/)) and serves it on `:4200`, proxying `/api` to the backend.
 4. Registers the test account through the API. The database is new for each run, so no secrets are needed.
-5. Runs the tests on all three browsers, prints the app logs if anything fails, and uploads the HTML report as an artifact.
+5. Runs the tests on all three browsers inside the official Playwright Docker image (matched to the installed Playwright version), which already has the browsers and their system libraries. It then prints the app logs if anything fails, and uploads the HTML report as an artifact.
 
 ## Roadmap
 

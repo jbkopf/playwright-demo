@@ -24,17 +24,26 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Start pulling the Playwright image
+        # The image tag must match the installed @playwright/test version exactly, so read it from
+        # the lockfile. The pull runs in the background while the apps start.
+        run: |
+          PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v$(jq -r '.packages["node_modules/@playwright/test"].version' package-lock.json)-noble"
+          echo "PLAYWRIGHT_IMAGE=$PLAYWRIGHT_IMAGE" >> "$GITHUB_ENV"
+          echo "Pulling $PLAYWRIGHT_IMAGE"
+          nohup docker pull "$PLAYWRIGHT_IMAGE" > "$RUNNER_TEMP/image-pull.log" 2>&1 &
 
       - name: Check out backend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.BACKEND_REPO }}
           ref: ${{ env.BACKEND_REF }}
           path: .ci/backend
 
       - name: Check out frontend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.FRONTEND_REPO }}
           ref: ${{ env.FRONTEND_REF }}
@@ -42,10 +51,20 @@ jobs:
           submodules: true # the theme CSS lives in the realworld submodule
 
       - name: Start backend (Django + Postgres)
+        # Upstream compose has no healthcheck, and Postgres restarts once after initializing, so
+        # Django can run its migrations too early and exit. Start the db first, then wait until it
+        # accepts TCP connections (the temporary init server only listens on a Unix socket).
         working-directory: .ci/backend
-        run: docker compose up -d --build
+        run: |
+          docker compose up -d db
+          for i in $(seq 1 30); do
+            docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres -q && break
+            sleep 2
+          done
+          docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres
+          docker compose up -d --build realword-app
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
 
@@ -77,11 +96,6 @@ jobs:
             -d "{\"user\":{\"username\":\"$ADMIN_USERNAME\",\"email\":\"$ADMIN_USER_EMAIL\",\"password\":\"$ADMIN_USER_PASSWORD\"}}" \
             -o /dev/null -w "Registered admin user: HTTP %{http_code}\n"
 
-      - name: Install test dependencies
-        run: |
-          npm ci
-          npx playwright install --with-deps
-
       - name: Wait for frontend
         run: |
           for i in $(seq 1 90); do
@@ -90,8 +104,16 @@ jobs:
           done
           echo "Frontend did not start"; exit 1
 
-      - name: Run Playwright tests
-        run: npx playwright test
+      - name: Run Playwright tests (in the Playwright Docker image)
+        # The image ships the browsers and their system libraries, so there is no
+        # `playwright install --with-deps`. Host networking makes localhost:4200 the runner's app;
+        # --ipc=host gives Chromium enough shared memory.
+        run: |
+          docker run --rm --network host --ipc=host \
+            -v "$PWD":/work -w /work \
+            -e CI -e ADMIN_USER_EMAIL -e ADMIN_USER_PASSWORD -e ADMIN_USERNAME \
+            "$PLAYWRIGHT_IMAGE" \
+            /bin/bash -c "npm ci && npx playwright test"
 
       - name: Show app logs
         if: ${{ failure() }}
@@ -99,7 +121,7 @@ jobs:
           echo "::group::Backend logs"; (cd .ci/backend && docker compose logs); echo "::endgroup::"
           echo "::group::Frontend logs"; cat .ci/frontend.log; echo "::endgroup::"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: playwright-report

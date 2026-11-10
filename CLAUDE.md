@@ -35,7 +35,7 @@ Runtime: Node 26 (via nvm; `@types/node` ^26). No npm scripts.
 
 ```bash
 npm ci                                   # install deps
-npx playwright install --with-deps       # install browsers (needed once / on CI)
+npx playwright install --with-deps       # install browsers (needed once locally; CI uses the Playwright Docker image)
 npx playwright test                      # setup project, then all tests on chromium, firefox, webkit
 npx playwright test tests/login.spec.ts             # single file (setup project still runs first)
 npx playwright test -g "has the Conduit title"      # single test by title
@@ -59,10 +59,11 @@ No lint or build step exists; TypeScript is compiled on the fly by Playwright, w
 
 `.github/workflows/playwright.yml` runs on push and pull requests to `main` (plus manual dispatch). It builds the whole app on the runner:
 
-- **Backend:** `c4ffein/realworld-django-ninja` checked out at a pinned SHA into `.ci/backend` (git-ignored), started with its own `docker compose` (Django on `:8000` + Postgres).
+- **Backend:** `c4ffein/realworld-django-ninja` checked out at a pinned SHA into `.ci/backend` (git-ignored), started with its own `docker compose` (Django on `:8000` + Postgres). The workflow starts `db` first and waits for `pg_isready` over TCP before starting `realword-app` (sic), because upstream has no healthcheck and Django exits if it migrates while Postgres is still initializing.
 - **Frontend:** `realworld-apps/angular-realworld-example-app` at a pinned SHA into `.ci/frontend`, **with submodules** (the theme CSS is in the `realworld` submodule; the build fails without it). Upstream hard-codes the public demo API, so `ci/frontend/` holds overrides copied over the checkout: an interceptor that reads `environment.apiUrl`, an `environment.ts` with `apiUrl: '/api'`, and `proxy.conf.mjs`. It runs as `ng serve --proxy-config proxy.conf.mjs` on `:4200`, the same shape as the local setup.
 - **Admin user:** the CI database is fresh each run, so a step registers the account via `POST /api/users`. The `ADMIN_*` values are plain workflow env vars, not secrets.
-- Node comes from `.nvmrc`. On failure the job prints backend and frontend logs; the HTML report is always uploaded as an artifact (30-day retention).
+- **Tests run inside `mcr.microsoft.com/playwright:v<version>-noble`** via `docker run --network host --ipc=host`, so there is no `playwright install --with-deps`. The tag is read from `package-lock.json`, so it always matches the installed `@playwright/test`; bumping Playwright needs no workflow change. The image is pulled in the background at the start of the job. Host networking keeps `localhost:4200` and `:8000` the same as on the runner.
+- Host Node (for the Angular dev server) comes from `.nvmrc`; the tests use the image's own Node. On failure the job prints backend and frontend logs; the HTML report is always uploaded as an artifact (30-day retention).
 
 To move to newer app versions, change `BACKEND_REF`/`FRONTEND_REF` in the workflow and check whether the overrides still apply.
 
