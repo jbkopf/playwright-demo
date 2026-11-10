@@ -51,8 +51,18 @@ jobs:
           submodules: true # the theme CSS lives in the realworld submodule
 
       - name: Start backend (Django + Postgres)
+        # Upstream compose has no healthcheck, and Postgres restarts once after initializing, so
+        # Django can run its migrations too early and exit. Start the db first, then wait until it
+        # accepts TCP connections (the temporary init server only listens on a Unix socket).
         working-directory: .ci/backend
-        run: docker compose up -d --build
+        run: |
+          docker compose up -d db
+          for i in $(seq 1 30); do
+            docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres -q && break
+            sleep 2
+          done
+          docker compose exec -T db pg_isready -h 127.0.0.1 -U postgres
+          docker compose up -d --build realword-app
 
       - uses: actions/setup-node@v7
         with:
