@@ -12,11 +12,17 @@ A learning project: the owner is getting hands-on with Playwright. Their most re
 
 The app under test is Conduit (RealWorld) at `http://localhost:4200` (`use.baseURL`), so specs use relative paths like `page.goto('/')`. It must already be running before tests start; nothing in this repo starts it. Its REST API is served from the same origin under `/api` (token auth: `Authorization: Token <jwt>`).
 
-- **Specs import `test`/`expect` from `../fixtures`, not `@playwright/test`.** `fixtures/index.ts` extends the base test with page-object fixtures (`loginPage`, `homePage`, `navBar`) and data fixtures (`adminUser`, `article`). The `loginPage` and `homePage` fixtures navigate on creation, so just requesting one in a test or `beforeEach` loads that page.
+- **Specs import `test`/`expect` from `../fixtures`, not `@playwright/test`.** Fixtures are split by concern and layered by dependency:
+  - `data.fixture.ts` extends `base` and provides `adminUser` and `article`. `article` is a fresh faker object per test.
+  - `api.fixture.ts` extends the data `test` and provides `conduitApi`, a logged-in `ConduitApi` (test scope), disposed after `use()`.
+  - `pages.fixture.ts` extends `base` and provides `loginPage`, `homePage` and `navBar`. `loginPage` and `homePage` navigate on creation, so just requesting one loads that page.
+  - `index.ts` only does `mergeTests(pagesTest, apiTest)` and re-exports `expect`; the data fixtures arrive through the API branch.
+
+  A new fixture file extends whichever `test` has the fixtures it depends on (fixture types only see what their parent `test` declares), then gets added to the merge in `index.ts`.
 - **Page objects** (`pages/*.page.ts`, shared components in `pages/components/`) expose `readonly Locator` fields built in the constructor, plus `goto()`/action methods. They contain no assertions; assertions stay in specs.
 - **Auth via storage state.** The `setup` project (`tests/*.setup.ts`) logs in through the UI as the admin user and saves `playwright/.auth/admin.json` (git-ignored). The chromium/firefox/webkit projects depend on `setup` and use that file, so **every test starts signed in by default**. Signed-out tests opt out with `test.use({ storageState: { cookies: [], origins: [] } })`.
 - **Test data** (`data/`): `users.ts` reads the admin account from env and throws at import if a key is missing; `articles.ts` generates article content with `@faker-js/faker`.
-- **API layer** (`api/conduit-api.ts`, in progress): `ConduitApi.Login()` gets a token and returns a client wrapping an authenticated `APIRequestContext`, for creating and cleaning up data without the UI. `tests/api-scratch.spec.ts` is the owner's experiment with it.
+- **API layer** (`api/conduit-api.ts`): `ConduitApi.Login()` gets a token and returns a client wrapping an authenticated `APIRequestContext`, for creating and cleaning up data without the UI. Action methods (`createArticle`, `deleteArticle`) assert `toBeOK()`. `getArticle` returns the raw response so tests can assert failure statuses. Specs use it through the `conduitApi` fixture, as in `tests/api-scratch.spec.ts`.
 
 Runtime: Node 26 (via nvm; `@types/node` ^26). No npm scripts.
 
