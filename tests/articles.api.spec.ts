@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures';
 
-test.describe('API_crud', () => {    
+test.describe('Articles API', () => {    
     test('can create and delete an article via API', async ({ article, conduitApi }) => {
 
         const slug = await conduitApi.createArticle(article);
