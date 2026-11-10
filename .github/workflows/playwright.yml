@@ -1,25 +1,107 @@
 name: Playwright Tests
-# Manual trigger only: CI needs a running Conduit app and ADMIN_* secrets, which aren't set up yet.
+
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+env:
+  # Upstream apps under test, pinned so a change upstream can't break CI unannounced.
+  BACKEND_REPO: c4ffein/realworld-django-ninja
+  BACKEND_REF: 04ef47ced437ee8795a13bdcbc2eff2be19e33bd
+  FRONTEND_REPO: realworld-apps/angular-realworld-example-app
+  FRONTEND_REF: dd99ed2cf39c805d719f943c5d7061a5683d98a8
+  # The CI database is created empty for each run and thrown away afterwards,
+  # so these throwaway credentials are not secrets. The "Seed admin user" step registers the account.
+  ADMIN_USER_EMAIL: ci-admin@example.com
+  ADMIN_USER_PASSWORD: ci-admin-password
+  ADMIN_USERNAME: ci_admin
+
 jobs:
   test:
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: lts/*
-    - name: Install dependencies
-      run: npm ci
-    - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
-    - name: Run Playwright tests
-      run: npx playwright test
-    - uses: actions/upload-artifact@v4
-      if: ${{ !cancelled() }}
-      with:
-        name: playwright-report
-        path: playwright-report/
-        retention-days: 30
+      - uses: actions/checkout@v4
+
+      - name: Check out backend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BACKEND_REPO }}
+          ref: ${{ env.BACKEND_REF }}
+          path: .ci/backend
+
+      - name: Check out frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          ref: ${{ env.FRONTEND_REF }}
+          path: .ci/frontend
+          submodules: true # the theme CSS lives in the realworld submodule
+
+      - name: Start backend (Django + Postgres)
+        working-directory: .ci/backend
+        run: docker compose up -d --build
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Patch frontend to use the local backend
+        # Upstream hard-codes the public demo API; these overrides point it at /api,
+        # which the dev server proxies to the backend on :8000.
+        run: cp -r ci/frontend/. .ci/frontend/
+
+      - name: Start frontend
+        working-directory: .ci/frontend
+        run: |
+          bun install --frozen-lockfile
+          nohup npx ng serve --proxy-config proxy.conf.mjs --port 4200 > ../frontend.log 2>&1 &
+
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:8000/api/tags && exit 0
+            sleep 2
+          done
+          echo "Backend did not start"; exit 1
+
+      - name: Seed admin user
+        run: |
+          curl -sf -X POST http://localhost:8000/api/users \
+            -H 'Content-Type: application/json' \
+            -d "{\"user\":{\"username\":\"$ADMIN_USERNAME\",\"email\":\"$ADMIN_USER_EMAIL\",\"password\":\"$ADMIN_USER_PASSWORD\"}}" \
+            -o /dev/null -w "Registered admin user: HTTP %{http_code}\n"
+
+      - name: Install test dependencies
+        run: |
+          npm ci
+          npx playwright install --with-deps
+
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 90); do
+            curl -sf -o /dev/null http://localhost:4200 && curl -sf -o /dev/null http://localhost:4200/api/tags && exit 0
+            sleep 2
+          done
+          echo "Frontend did not start"; exit 1
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Show app logs
+        if: ${{ failure() }}
+        run: |
+          echo "::group::Backend logs"; (cd .ci/backend && docker compose logs); echo "::endgroup::"
+          echo "::group::Frontend logs"; cat .ci/frontend.log; echo "::endgroup::"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
