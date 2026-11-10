@@ -20,7 +20,7 @@ export class ConduitApi {
         return new ConduitApi(authed);
     };
 
-    async createArticle(article: Article) {
+    async createArticle(article: Article) : Promise<string> {
         const response = await this.request.post('/api/articles', {
             data: {
                 article

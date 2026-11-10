@@ -2,11 +2,13 @@ import { test as base } from '@playwright/test';
 import { LoginPage } from '../pages/login.page';
 import { NavBar } from '../pages/components/nav-bar';
 import { HomePage } from '../pages/home.page';
+import { ArticlePage } from '../pages/article.page';
 
 type PageFixtures = {
     loginPage: LoginPage;
     navBar: NavBar;
     homePage: HomePage;
+    articlePage: ArticlePage;
 }
 
 export const test = base.extend<PageFixtures>({
@@ -24,4 +26,8 @@ export const test = base.extend<PageFixtures>({
         await homePage.goto();
         await use(homePage);
     },
+    articlePage: async ({ page }, use) => {
+        const articlePage = new ArticlePage(page);
+        await use(articlePage);
+    }
 });
