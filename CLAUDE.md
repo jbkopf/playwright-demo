@@ -57,4 +57,13 @@ No lint or build step exists; TypeScript is compiled on the fly by Playwright, w
 
 ## CI
 
-`.github/workflows/playwright.yml` is manual-trigger only (`workflow_dispatch`) until CI has a running Conduit app and `ADMIN_*` secrets. Steps: `npm ci` → `npx playwright install --with-deps` → `npx playwright test`, then uploads `playwright-report/` as an artifact (30-day retention).
+`.github/workflows/playwright.yml` runs on push and pull requests to `main` (plus manual dispatch). It builds the whole app on the runner:
+
+- **Backend:** `c4ffein/realworld-django-ninja` checked out at a pinned SHA into `.ci/backend` (git-ignored), started with its own `docker compose` (Django on `:8000` + Postgres).
+- **Frontend:** `realworld-apps/angular-realworld-example-app` at a pinned SHA into `.ci/frontend`, **with submodules** (the theme CSS is in the `realworld` submodule; the build fails without it). Upstream hard-codes the public demo API, so `ci/frontend/` holds overrides copied over the checkout: an interceptor that reads `environment.apiUrl`, an `environment.ts` with `apiUrl: '/api'`, and `proxy.conf.mjs`. It runs as `ng serve --proxy-config proxy.conf.mjs` on `:4200`, the same shape as the local setup.
+- **Admin user:** the CI database is fresh each run, so a step registers the account via `POST /api/users`. The `ADMIN_*` values are plain workflow env vars, not secrets.
+- Node comes from `.nvmrc`. On failure the job prints backend and frontend logs; the HTML report is always uploaded as an artifact (30-day retention).
+
+To move to newer app versions, change `BACKEND_REF`/`FRONTEND_REF` in the workflow and check whether the overrides still apply.
+
+Locally, the same two repos live in `~/projects/realworld-django-ninja` and `~/projects/angular-realworld-example-app`; the frontend there carries the equivalent changes as a `local` Angular configuration (`npm run start:local`).

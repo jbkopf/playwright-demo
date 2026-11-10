@@ -78,12 +78,18 @@ npx playwright show-report                       # HTML report of the last run
 
 ## CI
 
-[`.github/workflows/playwright.yml`](.github/workflows/playwright.yml) installs dependencies and browsers, runs the suite and uploads the HTML report as an artifact. For now it only runs when started manually, because it needs a running Conduit app and the account credentials as repository secrets (see Roadmap).
+[`.github/workflows/playwright.yml`](.github/workflows/playwright.yml) runs the full suite on every push and pull request to `main`, against a complete Conduit stack built on the GitHub runner:
+
+1. Checks out the [Django backend](https://github.com/c4ffein/realworld-django-ninja) and the [Angular frontend](https://github.com/realworld-apps/angular-realworld-example-app), each pinned to a commit so upstream changes can't break the build unannounced.
+2. Starts the backend and Postgres with Docker Compose.
+3. Points the frontend at that backend instead of the public demo API (small overrides in [`ci/frontend/`](ci/frontend/)) and serves it on `:4200`, proxying `/api` to the backend.
+4. Registers the test account through the API. The database is new for each run, so no secrets are needed.
+5. Runs the tests on all three browsers, prints the app logs if anything fails, and uploads the HTML report as an artifact.
 
 ## Roadmap
 
 - [x] Page objects, custom fixtures, saved login session (`storageState`)
 - [x] API client and API-driven test data with automatic cleanup
-- [ ] Run CI against a containerized Conduit frontend and backend on every push and pull request
+- [x] CI against the full Conduit stack (backend in Docker, frontend built on the runner) on every push and pull request
 - [ ] Mock API responses with `page.route` to test how the UI handles errors
 - [ ] Assert on the network calls the UI makes (`page.waitForResponse`)
